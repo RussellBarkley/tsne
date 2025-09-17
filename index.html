@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>t-SNE — Zoomify</title>
+  <script src="openseadragon/openseadragon.min.js"></script>
+  <style>
+    html, body { height:100%; margin:0; background:#111; color:#fff; font:14px/1.35 system-ui, Arial, sans-serif; }
+    #osd { position:absolute; inset:0; }
+    .panel { position:absolute; left:12px; bottom:12px; z-index:20; display:flex; gap:8px;
+             background:rgba(0,0,0,.45); padding:8px 10px; border-radius:10px; }
+    .panel button { border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.08);
+                    color:#fff; padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:600; }
+    .panel button.active { border-color:#7ec8ff; box-shadow:0 0 0 2px rgba(126,200,255,.25) inset; }
+    #label { position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:20;
+             background:rgba(0,0,0,.55); padding:6px 12px; border-radius:10px; font-weight:600; pointer-events:none; }
+    #err { position:absolute; top:12px; left:12px; z-index:30; max-width:60ch;
+           background:#b00020; color:#fff; padding:8px 10px; border-radius:8px; display:none; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="osd"></div>
+  <div class="panel" aria-label="Distance metric">
+    <button id="btnCosine" type="button">Cosine</button>
+    <button id="btnEuclidean" type="button">Euclidean</button>
+  </div>
+  <div id="label">t-SNE — cosine</div>
+  <div id="err"></div>
+
+  <script>
+    const SOURCES = {
+      cosine:    'tsne_cosine',
+      euclidean: 'tsne_euclidean'
+    };
+
+    const viewer = OpenSeadragon({
+      id: 'osd',
+      prefixUrl: 'openseadragon/images/',
+      preserveViewport: true,
+      showNavigationControl: true,
+      autoHideControls: false,
+      visibilityRatio: 1.0,
+      minPixelRatio: 0.5,
+      maxZoomPixelRatio: 2.0
+    });
+
+    const errBox = document.getElementById('err');
+    const label = document.getElementById('label');
+    const btnCosine = document.getElementById('btnCosine');
+    const btnEuclidean = document.getElementById('btnEuclidean');
+
+    function showError(msg) { errBox.textContent = msg; errBox.style.display = 'block'; }
+    function clearError()   { errBox.style.display = 'none'; }
+
+    function setActive(which) {
+      btnCosine.classList.toggle('active', which === 'cosine');
+      btnEuclidean.classList.toggle('active', which === 'euclidean');
+      label.textContent = `t-SNE — ${which}`;
+    }
+
+    async function loadZoomify(folder) {
+      clearError();
+      const xmlUrl = `${folder}/ImageProperties.xml`;
+      try {
+        const res = await fetch(xmlUrl);
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${xmlUrl}`);
+        const xmlText = await res.text();
+
+        const xml = new DOMParser().parseFromString(xmlText, 'application/xml');
+        const img = xml.querySelector('IMAGE_PROPERTIES');
+        if (!img) throw new Error('No <IMAGE_PROPERTIES> in XML');
+
+        const width  = parseInt(img.getAttribute('WIDTH'), 10);
+        const height = parseInt(img.getAttribute('HEIGHT'), 10);
+        const tileSz = parseInt(img.getAttribute('TILESIZE') || '256', 10);
+
+        // Open explicitly as Zoomify tileservice
+        const source = {
+          type: 'zoomifytileservice',
+          tilesUrl: folder + '/',     // MUST end with '/'
+          width: width,
+          height: height,
+          tileSize: tileSz,
+          fileFormat: 'png'           // you generated PNG tiles
+        };
+        viewer.open(source);
+      } catch (e) {
+        showError(
+          `Failed to load tiles:\n${e.message}\n\n` +
+          `Quick checks:\n` +
+          `• Can you open ${xmlUrl} directly in the browser?\n` +
+          `• Does "${folder}" contain ImageProperties.xml and TileGroup*/ folders?\n` +
+          `• Are you serving this folder via http (not file://)?`
+        );
+      }
+    }
+
+    function switchMetric(which) { setActive(which); loadZoomify(SOURCES[which]); }
+
+    btnCosine.addEventListener('click', () => switchMetric('cosine'));
+    btnEuclidean.addEventListener('click', () => switchMetric('euclidean'));
+    window.addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase();
+      if (k === 'c') switchMetric('cosine');
+      if (k === 'e') switchMetric('euclidean');
+    });
+
+    viewer.addHandler('open-failed', ev => showError(`OpenSeadragon open-failed: ${ev.message || 'unknown'}`));
+    viewer.addHandler('tile-load-failed', ev => showError(`Tile load failed: ${ev.message || (ev.tile && ev.tile.url) || 'unknown'}`));
+
+    // Initial load
+    switchMetric('cosine');
+  </script>
+</body>
+</html>
